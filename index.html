@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <!-- CRUCIALE PER MOBILE: Assicura che la pagina si adatti alla larghezza del dispositivo. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulazione App AR per Illuminazione</title>
+    <!-- Carica Tailwind CSS per uno stile moderno e responsivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carica Three.js per la gestione della grafica 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Carica il modulo OrbitControls per il controllo della telecamera (funziona ottimamente con il touch) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        /* Stili personalizzati per il corpo e il canvas */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Evita le barre di scorrimento */
+            background-color: #1f2937; /* Sfondo scuro per l'atmosfera */
+        }
+        #scene-container {
+            width: 100vw;
+            height: calc(100vh - 80px); /* Usa l'altezza rimanente, adattandosi a mobile */
+            cursor: pointer;
+            position: relative;
+        }
+        .ui-panel {
+            background-color: #374151;
+            box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -2px rgba(0, 0, 0, 0.1);
+            min-height: 80px; /* Altezza fissa per il pannello inferiore */
+        }
+        /* Assicura che il canvas si adatti sempre alla scena-container */
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="scene-container">
+        <!-- Il canvas 3D verrà inserito qui -->
+    </div>
+
+    <!-- Pannello di controllo ottimizzato per mobile: pulsante a tutta larghezza in basso se lo schermo è piccolo -->
+    <div class="ui-panel p-4 flex flex-col md:flex-row items-center justify-between text-white">
+        <div class="mb-2 md:mb-0 text-center md:text-left">
+            <h1 class="text-lg font-bold">Visualizzazione Lampadario AR (Simulata)</h1>
+            <p class="text-xs text-gray-400">Tocca lo schermo per riposizionare. Trascina/Pizzica per ruotare/zoomare la vista.</p>
+        </div>
+        <button id="reset-button" class="w-full md:w-auto mt-2 md:mt-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md">
+            Reset Vista
+        </button>
+    </div>
+
+    <script>
+        // Variabili globali per la scena Three.js
+        let scene, camera, renderer, chandelier, ceiling;
+        const container = document.getElementById('scene-container');
+        let isSceneReady = false;
+
+        // Inizializzazione della scena 3D
+        function init() {
+            // 1. SCENA
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x334155); 
+
+            // 2. TELECAMERA (Camera prospettica)
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 5, 5); 
+
+            // 3. RENDERER (Motore di rendering)
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // 4. LUCI
+            const ambientLight = new THREE.AmbientLight(0x404040, 5); 
+            scene.add(ambientLight);
+
+            // Luce puntiforme, simula la luce emessa dal lampadario
+            const chandelierLight = new THREE.PointLight(0xffffee, 10, 50);
+            chandelierLight.position.set(0, 0, 0); 
+            chandelierLight.castShadow = true;
+            chandelierLight.shadow.mapSize.width = 1024;
+            chandelierLight.shadow.mapSize.height = 1024;
+
+            // 5. AMBIENTE SIMULATO (Il Soffitto)
+            const ceilingGeometry = new THREE.PlaneGeometry(10, 10);
+            const ceilingMaterial = new THREE.MeshPhongMaterial({ color: 0x475569, side: THREE.DoubleSide });
+            ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+            ceiling.rotation.x = Math.PI / 2; 
+            ceiling.position.y = 3; 
+            ceiling.receiveShadow = true;
+            scene.add(ceiling);
+
+            // 6. IL LAMPADARIO (Placeholder)
+            const baseGeometry = new THREE.CylinderGeometry(0.5, 0.2, 0.8, 16);
+            const detailGeometry = new THREE.SphereGeometry(0.3, 16, 8);
+
+            const materialGold = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0xaa8800, shininess: 100 });
+            const materialGlass = new THREE.MeshPhongMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, shininess: 200 });
+
+            const base = new THREE.Mesh(baseGeometry, materialGold);
+            const detail = new THREE.Mesh(detailGeometry, materialGlass);
+
+            chandelier = new THREE.Group();
+            chandelier.add(base);
+            chandelier.add(detail);
+            detail.position.y = -0.6; 
+
+            chandelier.add(chandelierLight); 
+            chandelier.traverse(function(object) {
+                if (object.isMesh) {
+                    object.castShadow = true;
+                }
+            });
+
+            chandelier.position.set(0, 2.5, 0);
+            scene.add(chandelier);
+
+            // Aggiunge il sistema di controllo della telecamera
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; 
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 2, 0); 
+            
+            // CONFIGURAZIONE TOUCH PER MOBILE: 
+            // 1 dito: Ruota (ROTATE). 2 dita: Zoom (DOLLY) e Sposta (PAN).
+            controls.touches = {
+                ONE: THREE.TOUCH.ROTATE,
+                TWO: THREE.TOUCH.DOLLY_PAN
+            };
+            
+            controls.update();
+
+            // 7. GESTIONE EVENTI
+            window.addEventListener('resize', onWindowResize, false);
+            
+            // Usiamo 'click' che si attiva dopo un tap, evitando collisioni con il drag di OrbitControls.
+            container.addEventListener('click', onContainerClick, false);
+            
+            document.getElementById('reset-button').addEventListener('click', () => {
+                camera.position.set(0, 5, 5);
+                controls.target.set(0, 2, 0);
+                controls.update();
+            }, false);
+
+            isSceneReady = true;
+            animate();
+        }
+
+        // Funzione per animare la scena
+        function animate() {
+            if (!isSceneReady) return;
+
+            requestAnimationFrame(animate);
+            // IMPORTANTE: aggiorna i controlli per l'effetto damping (inerzia)
+            if (typeof controls !== 'undefined') {
+                controls.update();
+            }
+
+            // Piccola rotazione per dare l'impressione che sia un oggetto sospeso
+            chandelier.rotation.y += 0.005;
+
+            renderer.render(scene, camera);
+        }
+
+        // Gestione del ridimensionamento della finestra
+        function onWindowResize() {
+            // Aggiorna le dimensioni del container basandosi sul 100% della vista disponibile
+            const newHeight = window.innerHeight - document.querySelector('.ui-panel').offsetHeight;
+            container.style.height = `${newHeight}px`;
+
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // Funzione per simulare il posizionamento del lampadario (hit test AR)
+        function onContainerClick(event) {
+            // Calcola le coordinate normalizzate del mouse/touch
+            const rect = container.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((event.clientX - rect.left) / rect.width) * 2 - 1,
+                -(((event.clientY - rect.top) / rect.height) * 2 - 1)
+            );
+
+            // Raycaster per intersecare oggetti 3D (simula il rilevamento del piano AR)
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+
+            // Interseca solo il soffitto
+            const intersects = raycaster.intersectObject(ceiling);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+
+                // Sposta il lampadario al punto di intersezione (punto di posizionamento)
+                // Imposta la posizione X e Z al punto intersecato
+                chandelier.position.x = intersect.point.x;
+                chandelier.position.z = intersect.point.z;
+                // L'altezza Y è fissa (leggermente sotto il soffitto)
+                chandelier.position.y = 2.5;
+
+                // Feedback visivo
+                console.log(`Lampadario riposizionato a: x=${chandelier.position.x.toFixed(2)}, z=${chandelier.position.z.toFixed(2)}`);
+
+                // Animazione temporanea per il feedback di posizionamento
+                const scaleTarget = { x: 1.1, y: 1.1, z: 1.1 };
+                const originalScale = { x: 1, y: 1, z: 1 };
+
+                // Simula una breve animazione di scala per feedback
+                chandelier.scale.set(scaleTarget.x, scaleTarget.y, scaleTarget.z);
+                setTimeout(() => {
+                    chandelier.scale.set(originalScale.x, originalScale.y, originalScale.z);
+                }, 100);
+            }
+        }
+
+        // Avvia l'app quando la finestra è caricata
+        window.onload = () => {
+            init();
+            // Chiama la funzione resize subito dopo l'inizializzazione per calcolare l'altezza corretta
+            onWindowResize(); 
+        };
+    </script>
+
+</body>
+</html>
